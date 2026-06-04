@@ -102,6 +102,101 @@ conda activate emphysema
 pip install SimpleITK scipy numpy scikit-image matplotlib pydicom
 ```
 
+## Testing
+
+### Unit Tests
+
+The project includes comprehensive unit tests for both algorithms.
+
+**Install test dependencies:**
+```bash
+pip install -r requirements-dev.txt
+```
+
+**Run all tests:**
+```bash
+pytest
+```
+
+**Run tests with coverage report:**
+```bash
+pytest --cov=. --cov-report=html
+# Open htmlcov/index.html to view coverage
+```
+
+**Run specific test file:**
+```bash
+pytest tests/test_emphy_size.py -v
+```
+
+**Run specific test class or function:**
+```bash
+pytest tests/test_emphy_size.py::TestNoiseReduction -v
+pytest tests/test_emphy_size.py::TestNoiseReduction::test_noise_reduction_removes_small_clusters -v
+```
+
+**Run tests in parallel (faster):**
+```bash
+pytest -n auto
+```
+
+### Code Quality
+
+**Format code (auto-fix):**
+```bash
+black emphy_size.py emphy_size_distance.py tests/
+isort emphy_size.py emphy_size_distance.py tests/
+```
+
+**Check code quality:**
+```bash
+flake8 emphy_size.py emphy_size_distance.py tests/
+mypy emphy_size.py emphy_size_distance.py --ignore-missing-imports
+```
+
+**Run all checks with tox (multiple Python versions):**
+```bash
+tox                    # Run tests on all Python versions
+tox -e coverage        # Generate coverage report
+tox -e lint            # Run linting checks
+tox -e format          # Auto-format code
+tox -e typecheck       # Run type checking
+```
+
+### Continuous Integration
+
+GitHub Actions automatically runs tests on every push and pull request:
+- Tests run on Python 3.9, 3.10, 3.11
+- Tests run on Linux, Windows, macOS
+- Code coverage is uploaded to Codecov
+- Linting checks enforce code quality
+
+See [`.github/workflows/tests.yml`](.github/workflows/tests.yml) for CI configuration.
+
+### Test Structure
+
+```
+tests/
+├── __init__.py                 # Test package
+├── conftest.py                 # Pytest fixtures and test utilities
+├── test_emphy_size.py          # Tests for Gaussian LPF method
+└── test_emphy_size_distance.py # Tests for distance transform method
+```
+
+**Fixtures (in `conftest.py`):**
+- `synthetic_ct_volume` — Synthetic CT with lung and emphysema regions
+- `synthetic_spacing` — Typical voxel spacing (2mm, 0.625mm, 0.625mm)
+- `synthetic_lung_mask` — Lung segmentation mask
+- `synthetic_emph_mask` — Emphysema (LAA) mask
+- `temp_test_dir` — Temporary directory for test outputs
+
+**Test Coverage:**
+- Parameter validation and edge cases
+- Core algorithm functions (sigma estimation, noise reduction, distance transform)
+- Data container initialization and serialization
+- Integration tests with synthetic data
+- Output format and type correctness
+
 ## Usage
 
 ### Basic Pipeline (Gaussian LPF Method)
