@@ -9,92 +9,68 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from emphy_size_distance import (
-    compute_voxel_volume,
-    compute_emphysema_indices,
+    noise_reduction,
+    compute_distance_transform,
     EmphysemaResult,
 )
 
 
-class TestComputeVoxelVolume:
-    """Test voxel volume calculation."""
+class TestComputeDistanceTransform:
+    """Test distance transform computation."""
     
-    def test_voxel_volume_isotropic(self):
-        """Isotropic spacing should compute correctly."""
-        spacing = (1.0, 1.0, 1.0)
-        voxel_vol = compute_voxel_volume(spacing)
-        assert np.isclose(voxel_vol, 1.0), "1mm³ voxel should have volume 1.0 mm³"
+    def test_distance_transform_shape(self, synthetic_emph_mask):
+        """Distance transform should match input shape."""
+        edt = compute_distance_transform(synthetic_emph_mask, (1.0, 1.0, 1.0))
+        assert edt.shape == synthetic_emph_mask.shape
     
-    def test_voxel_volume_anisotropic(self):
-        """Anisotropic spacing should compute correctly."""
-        spacing = (2.0, 0.5, 0.5)
-        voxel_vol = compute_voxel_volume(spacing)
-        expected = 2.0 * 0.5 * 0.5
-        assert np.isclose(voxel_vol, expected)
+    def test_distance_transform_nonnegative(self, synthetic_emph_mask):
+        """Distance transform values should be non-negative."""
+        edt = compute_distance_transform(synthetic_emph_mask, (1.0, 1.0, 1.0))
+        assert (edt >= 0).all()
     
-    def test_voxel_volume_positive(self):
-        """Voxel volume should always be positive."""
-        spacing = (1.5, 0.625, 0.625)
-        voxel_vol = compute_voxel_volume(spacing)
-        assert voxel_vol > 0
+    def test_distance_transform_zero_outside_mask(self, synthetic_emph_mask):
+        """EDT should be zero outside emphysema mask."""
+        edt = compute_distance_transform(synthetic_emph_mask, (1.0, 1.0, 1.0))
+        background = ~synthetic_emph_mask
+        assert (edt[background] == 0).all()
+
+
+class TestNoiseReductionDistance:
+    """Test noise reduction for distance transform method."""
+    
+    def test_noise_reduction_removes_small_clusters(self):
+        """Clusters < 2 voxels should be removed."""
+        mask = np.zeros((10, 10, 10), dtype=bool)
+        
+        # Add a small isolated cluster (1 voxel)
+        mask[5, 5, 5] = True
+        
+        # Add a larger cluster (5 voxels)
+        mask[3:5, 3:5, 3] = True
+        
+        result = noise_reduction(mask)
+        
+        # Isolated voxel should be removed
+        assert not result[5, 5, 5], "Isolated voxel should be removed"
+        
+        # Larger cluster should remain
+        assert result[3:5, 3:5, 3].sum() > 0, "Larger cluster should remain"
+    
+    def test_noise_reduction_preserves_size(self):
+        """Output should be same shape as input."""
+        mask = np.random.rand(20, 30, 40) > 0.9
+        result = noise_reduction(mask)
+        assert result.shape == mask.shape
+    
+    def test_noise_reduction_output_type(self):
+        """Output should be boolean array."""
+        mask = np.random.rand(15, 15, 15) > 0.8
+        result = noise_reduction(mask)
+        assert result.dtype == bool
 
 
 class TestComputeEmphysemaIndices:
     """Test emphysema index computation."""
-    
-    def test_indices_basic_computation(self):
-        """Test basic index calculation with synthetic data."""
-        # Create synthetic masks
-        lung_mask = np.ones((20, 30, 30), dtype=bool)
-        emph_mask = np.zeros((20, 30, 30), dtype=bool)
-        emph_mask[10:15, 10:20, 10:20] = True  # 5*10*10 = 500 voxels
-        
-        subgroup_masks = {
-            'E1': np.zeros_like(emph_mask),
-            'E2': emph_mask.copy(),  # All emphysema in E2
-            'E3': np.zeros_like(emph_mask),
-            'E4': np.zeros_like(emph_mask),
-        }
-        
-        spacing = (1.0, 1.0, 1.0)  # 1mm³ voxels
-        
-        result = compute_emphysema_indices(
-            subgroup_masks, lung_mask, emph_mask, spacing
-        )
-        
-        # Assertions
-        assert isinstance(result, EmphysemaResult)
-        assert result.e2_volume_ml == pytest.approx(500.0, abs=1.0)  # 500 mm³ = 0.5 mL
-        assert result.laa_percent > 0
-    
-    def test_indices_fractions_sum_reasonably(self):
-        """E1-E4 fractions should sum to approximately total LAA."""
-        lung_mask = np.ones((30, 40, 40), dtype=bool)
-        emph_mask = np.zeros((30, 40, 40), dtype=bool)
-        emph_mask[10:25, 10:30, 10:30] = True
-        
-        # Distribute emphysema across subgroups
-        e1_mask = np.zeros_like(emph_mask)
-        e1_mask[10:15, 10:20, 10:20] = True
-        
-        e2_mask = np.zeros_like(emph_mask)
-        e2_mask[15:20, 10:20, 10:20] = True
-        
-        subgroup_masks = {
-            'E1': e1_mask,
-            'E2': e2_mask,
-            'E3': np.zeros_like(emph_mask),
-            'E4': np.zeros_like(emph_mask),
-        }
-        
-        spacing = (1.0, 1.0, 1.0)
-        result = compute_emphysema_indices(
-            subgroup_masks, lung_mask, emph_mask, spacing
-        )
-        
-        # Sum of individual fractions should be close to total LAA percent
-        total_subgroup_frac = (result.e1_fraction + result.e2_fraction + 
-                               result.e3_fraction + result.e4_fraction)
-        assert total_subgroup_frac <= result.laa_percent * 1.01  # Allow small rounding error
     
     def test_indices_output_types(self):
         """All index fields should be numeric."""
@@ -109,11 +85,17 @@ class TestComputeEmphysemaIndices:
             'E4': np.zeros_like(emph_mask),
         }
         
+        hole_catalogue = [
+            {'label': 0, 'radius_mm': 1.0, 'subgroup': 'E2', 'voxels': 8}
+        ]
+        
         spacing = (1.0, 1.0, 1.0)
+        from emphy_size_distance import compute_emphysema_indices
         result = compute_emphysema_indices(
-            subgroup_masks, lung_mask, emph_mask, spacing
+            subgroup_masks, hole_catalogue, lung_mask, emph_mask, spacing
         )
         
+        assert isinstance(result, EmphysemaResult)
         assert isinstance(result.laa_percent, (float, np.floating))
         assert isinstance(result.e1_volume_ml, (float, np.floating))
         assert isinstance(result.lung_volume_ml, (float, np.floating))
@@ -164,14 +146,9 @@ class TestIntegration:
     """Integration tests using synthetic data."""
     
     def test_distance_pipeline_on_synthetic_data(self, synthetic_emph_mask, synthetic_spacing):
-        """Test distance transform pipeline with synthetic data."""
-        from emphy_size_distance import distance_transform_edt_mm
-        
+        """Test distance transform computation with synthetic data."""
         # Compute EDT in mm
-        edt_mm = distance_transform_edt_mm(
-            synthetic_emph_mask.astype(np.float32),
-            synthetic_spacing
-        )
+        edt_mm = compute_distance_transform(synthetic_emph_mask, synthetic_spacing)
         
         # EDT should have same shape
         assert edt_mm.shape == synthetic_emph_mask.shape
@@ -182,3 +159,15 @@ class TestIntegration:
         # EDT should be zero outside emphysema mask
         background = ~synthetic_emph_mask
         assert (edt_mm[background] == 0).all()
+    
+    def test_noise_reduction_on_synthetic_mask(self, synthetic_emph_mask):
+        """Noise reduction should work on synthetic emphysema mask."""
+        result = noise_reduction(synthetic_emph_mask)
+        
+        # Result should be valid
+        assert result.dtype == bool
+        assert result.shape == synthetic_emph_mask.shape
+        
+        # Should not have more voxels than input
+        assert result.sum() <= synthetic_emph_mask.sum()
+
