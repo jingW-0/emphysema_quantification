@@ -45,10 +45,10 @@ NOISE_VOXEL_MIN = 2              # Remove clusters smaller than this
 # E2 1.5-7 mm  : subacinus
 # E3 7-15 mm   : acinus / sublobular
 # E4 >= 15 mm  : extra-lobular
-SIZE_THRESHOLDS_MM = [15.0, 7.0, 1.5]   # large -> small (iterative order)
+SIZE_THRESHOLDS_MM = [15.0, 7.0, 1.5]   # diameter thresholds, large -> small
 
 # Gaussian kernel sigma estimation parameters (Eq. 1 in paper)
-# sigma = beta0 + beta1 * gamma  where gamma = sphere radius
+# sigma = beta0 + 2 * beta1 * gamma  where gamma = sphere radius
 BETA0 = 0.147
 BETA1 = 0.1038
 
@@ -213,10 +213,10 @@ def noise_reduction(emph_mask: np.ndarray, min_voxels: int = NOISE_VOXEL_MIN) ->
 def estimate_sigma(radius_mm: float) -> float:
     """
     Estimate Gaussian kernel sigma from sphere radius.
-    Equation 1: sigma = beta0 + beta1 * gamma
+    Equation 1: sigma = beta0 + 2 * beta1 * gamma
     where gamma = radius of sphere in mm.
     """
-    return BETA0 + BETA1 * radius_mm
+    return BETA0 + 2 * BETA1 * radius_mm
 
 
 def visualize_lpf_iteration(
@@ -288,7 +288,7 @@ def size_based_emphysema_clustering(
     noise_reduced_mask : initial noise-cleaned emphysema mask (Pm,0)
     emph_mask          : original emphysema mask (Em) — used for intersection
     spacing_zyx        : voxel spacing in mm (z, y, x)
-    size_thresholds_mm : radii in mm, ordered large -> small
+    size_thresholds_mm : diameter thresholds in mm, ordered large -> small
 
     Returns
     -------
@@ -298,11 +298,12 @@ def size_based_emphysema_clustering(
     current_mask = noise_reduced_mask.copy().astype(np.float32)
     mean_spacing = np.mean(spacing_zyx)
 
-    # Thresholds map to subgroup labels (paper convention)
+    # Diameter thresholds map to subgroup labels (paper convention)
     threshold_to_label = {15.0: 'E4', 7.0: 'E3', 1.5: 'E2'}
 
-    for radius_mm in size_thresholds_mm:
-        label_name = threshold_to_label[radius_mm]
+    for diameter_mm in size_thresholds_mm:
+        label_name = threshold_to_label[diameter_mm]
+        radius_mm = diameter_mm / 2.0
 
         # Sigma in mm -> convert to voxels per axis
         sigma_mm = estimate_sigma(radius_mm)

@@ -33,8 +33,8 @@ Based on: **Oh et al. (2017)** — "Size variation and collapse of emphysema hol
 6. Compute emphysema indices by subgroup size
 
 **Key parameters:**
-- Gaussian sigma estimation: σ = 0.147 + 0.1038 × γ (mm)
-- Size thresholds: [15.0, 7.0, 1.5] mm (large → small)
+- Gaussian sigma estimation: sigma = 0.147 + 2 * 0.1038 * gamma, where gamma is radius in mm
+- Diameter thresholds: [15.0, 7.0, 1.5] mm (converted to radii [7.5, 3.5, 0.75] mm)
 
 **Pros:**
 - Established in literature; validated methodology
@@ -323,7 +323,7 @@ emphysema_quantification/
 
 The Gaussian LPF method applies iteratively scaled Gaussian filters to progressively segment emphysema by size:
 
-1. **Gaussian convolution** with kernel σ(γ) = 0.147 + 0.1038·γ mm
+1. **Gaussian convolution** with kernel sigma(gamma) = 0.147 + 2 * 0.1038 * gamma, where gamma is threshold diameter / 2
 2. **Skeleton extraction** via local maxima (≥99.9% of peak)
 3. **Anatomical dilation** to recover full hole boundary
 4. **Subtraction** and repeat with smaller kernel

@@ -30,9 +30,9 @@ class TestEstimateSigma:
         assert sigma_large > sigma_small, "sigma should increase with radius"
     
     def test_sigma_estimation_formula(self):
-        """Verify sigma follows paper formula: sigma = 0.147 + 0.1038 * radius."""
+        """Verify sigma follows paper formula: sigma = 0.147 + 2 * 0.1038 * radius."""
         radius = 7.5
-        expected_sigma = 0.147 + 0.1038 * radius
+        expected_sigma = 0.147 + 2 * 0.1038 * radius
         actual_sigma = estimate_sigma(radius)
         assert np.isclose(actual_sigma, expected_sigma, rtol=1e-5)
 
