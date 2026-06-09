@@ -13,7 +13,7 @@ Emphysema is characterized by destruction of alveolar walls, creating air-filled
 
 This codebase provides two independent methods for automated classification of emphysema holes.
 
-## Algorithms
+## Algorithms & Details
 
 ### 1. Size-Based Classification via Gaussian LPF (`emphy_size.py`)
 
@@ -349,31 +349,7 @@ emphysema_quantification/
 - **Research/algorithm comparison:** Use Distance Transform (novel, interpretable)
 - **Best practice:** Run both and compare outputs
 
-## Algorithm Details
 
-### Gaussian LPF Method
-
-The Gaussian LPF method applies iteratively scaled Gaussian filters to progressively segment emphysema by size:
-
-1. **Gaussian convolution** with kernel sigma(gamma) = 0.147 + 2 * 0.1038 * gamma, where gamma is threshold diameter / 2
-2. **Skeleton extraction** via local maxima (≥99.9% of peak)
-3. **Anatomical dilation** to recover full hole boundary
-4. **Subtraction** and repeat with smaller kernel
-
-See `emphy_size.py` function `size_based_emphysema_clustering()` for details.
-
-### Distance Transform + Watershed Method
-
-EDT-based segmentation provides direct hole sizing:
-
-1. **Distance transform**: Each voxel value = distance to nearest boundary (mm)
-2. **Peak detection**: Local maxima with h-maxima suppression (1.0 mm)
-3. **Watershed**: Region-growing from all peaks simultaneously
-4. **Radius classification**: EDT value at seed = hole radius
-
-See `emphy_size_distance.py` function `distance_transform_pipeline()` for details.
-
----
 
 ### 3. Iterative EDT Thresholding Method (`emphy_size_distance_iterative.py`)
 
