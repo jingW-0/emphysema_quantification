@@ -41,4 +41,3 @@ class TestIndicesCalculation:
         assert hasattr(result, 'laa_percent')
         assert hasattr(result, 'lung_volume_ml')
         assert isinstance(result.laa_percent, float)
-*** End Patch
