@@ -1,427 +1,256 @@
 # Emphysema Quantification Pipeline
 
-A Python framework for automated emphysema size classification from high-resolution CT scans, implementing three complementary algorithms for anatomical hole sizing.
+A Python framework for automated emphysema size classification from high-resolution CT scans. The repository includes three complementary algorithms for classifying emphysema low-attenuation regions into anatomical size groups.
 
-## Background
+## Size Classes
 
-Emphysema is characterized by destruction of alveolar walls, creating air-filled cavities (holes) of varying sizes. Clinical significance depends on distribution and size:
+Emphysema is represented as air-filled low-attenuation regions within the lung. This project reports four size classes using diameter thresholds:
 
-- **E1** (<1.5 mm): Alveolar-level damage
-- **E2** (1.5–7 mm): Subacinar disease  
-- **E3** (7–15 mm): Acinar/sublobular disease
-- **E4** (≥15 mm): Paraseptal/extra-lobular emphysema
+| Class | Diameter | Interpretation |
+| --- | --- | --- |
+| E1 | < 1.5 mm | Alveolar-level damage / smallest residual regions |
+| E2 | 1.5-7 mm | Subacinar disease |
+| E3 | 7-15 mm | Acinar or sublobular disease |
+| E4 | >= 15 mm | Extra-lobular / largest holes |
 
-This codebase provides three independent methods for automated classification of emphysema holes.
+The common preprocessing steps are DICOM loading, lung segmentation, emphysema mask extraction using HU < -950, and removal of connected components smaller than 2 voxels.
 
-## Algorithms & Details
+## Algorithms
 
-### 1. Size-Based Classification via Gaussian LPF (`emphy_size.py`)
+### 1. Gaussian LPF Size Classification
 
-Based on: **Oh et al. (2017)** — "Size variation and collapse of emphysema holes at inspiration and expiration CT scan: evaluation with modified length scale method and image co-registration" — *International Journal of COPD* 12:2043–2057
+File: `emphy_size.py`
 
-**Pipeline:**
-1. Load DICOM series and extract HU values
-2. Segment lung via thresholding + morphological operations
-3. Extract emphysema mask (Low Attenuation Area, LAA ≤ -950 HU)
-4. Noise reduction: remove connected components < 2 voxels
-5. **Iterative Gaussian LPF:** Process from large to small kernel sizes
-   - Apply Gaussian filter to current mask
-   - Identify skeleton voxels (local maxima ≥ 99.9% of peak)
-   - Dilate by anatomical radius
-   - Intersect with original emphysema mask
-   - Subtract classified region from current mask; repeat
-6. Compute emphysema indices by subgroup size
+This method follows the modified length scale method from Oh et al. (2017). It processes diameter thresholds from large to small, converts each diameter to a radius, estimates a Gaussian kernel, extracts high-response skeleton voxels, dilates by the anatomical radius, intersects with the original emphysema mask, and subtracts the classified region before the next iteration.
 
-**Key parameters:**
-- Gaussian sigma estimation: sigma = 0.147 + 2 * 0.1038 * gamma, where gamma is radius in mm
-- Diameter thresholds: [15.0, 7.0, 1.5] mm (converted to radii [7.5, 3.5, 0.75] mm)
+Key details:
 
-**Pros:**
-- Established in literature; validated methodology
-- Smooth, continuous size spectrum via kernel scale
+- Diameter thresholds: 15.0, 7.0, 1.5 mm
+- Radii used for filtering/dilation: 7.5, 3.5, 0.75 mm
+- Sigma equation: `sigma = beta0 + 2 * beta1 * gamma`, where `gamma` is radius in mm
+- Constants: `beta0 = 0.147`, `beta1 = 0.1038`
 
-**Cons:**
-- Requires sigma estimation parameters
-- Iterative filtering may underestimate hole sizes at boundaries
-- Gaussian blur can merge nearby holes
+Best for: reproducing the published Oh et al. approach and comparing against an established method.
 
----
+Tradeoffs: requires sigma estimation and Gaussian filtering can blur nearby holes or underestimate boundaries.
 
-### 2. Size Classification via Distance Transform + Watershed (`emphy_size_distance.py`)
+### 2. Distance Transform + Watershed
 
-**Proposed alternative:** Direct hole segmentation and sizing via Euclidean distance.
+File: `emphy_size_distance.py`
 
-**Pipeline:**
-1. Load DICOM, segment lung, extract LAA mask (same as above)
-2. Noise reduction
-3. **Distance Transform:** Compute Euclidean distance (mm) from each emphysema voxel to the nearest non-emphysema boundary
-   - Peak of EDT map = center of hole
-   - EDT value at peak = hole radius
-4. **Seed detection:** Local maxima of EDT with h-maxima suppression (H = 1.0 mm)
-5. **Watershed segmentation:** Region-growing from all seeds simultaneously
-   - Regions grow competitively; boundaries settle at ridges (zero crossings of EDT gradient)
-   - Touching holes naturally separated
-6. **Direct classification:** EDT value at each region's seed → radius → size class
+This method computes the Euclidean distance transform (EDT) of the emphysema mask in physical millimeters. EDT peaks are treated as hole centers, h-maxima suppression selects seeds, and marker-controlled watershed separates regions. Each watershed region is classified by the EDT value at its seed.
 
-**Key parameters:**
-- EDT computed in physical mm (via voxel spacing)
-- h-maxima threshold: 1.0 mm (suppresses shallow boundary artifacts)
-- Radius thresholds: [0.75, 3.5, 7.5] mm → [E1, E2, E3, E4]
+Key details:
 
-**Pros:**
-- Physically interpretable: hole radius directly readable from EDT
-- No parameter estimation required
-- Single pass (non-iterative)
-- Naturally handles non-spherical holes
-- Touches holes separated by watershed ridge
+- EDT value at a peak approximates inscribed hole radius
+- Default h-maxima threshold: 1.0 mm
+- Radius thresholds: 0.75, 3.5, 7.5 mm
+- Produces a per-hole catalogue with centroid, radius, diameter, subgroup, and volume
 
-**Cons:**
-- Assumes holes are distinguishable in EDT (may fail in densely clustered emphysema)
-- Watershed sensitive to seed selection
+Best for: direct, interpretable per-hole segmentation when seed-based separation is useful.
 
----
+Tradeoffs: watershed output depends on seed detection and can be sensitive in densely connected emphysema.
 
-### 3. Iterative EDT Thresholding Method (`emphy_size_distance_iterative.py`)
+### 3. Iterative EDT Thresholding
 
-An alternative deterministic approach that classifies emphysema by directly
-thresholding the Euclidean Distance Transform (EDT) at anatomically grounded
-radii (large → small) and recovering full hole regions by dilation.
+File: `emphy_size_distance_iterative.py`
 
-**Pipeline (iterative EDT thresholding):**
-1. Compute EDT in physical mm for the noise-reduced emphysema mask
-2. For each radius threshold (7.5, 3.5, 0.75 mm):
-   - select core voxels with EDT > radius (hole centers)
-   - dilate cores by the same radius (recover full hole region)
-   - intersect with original emphysema mask and subtract from remaining mask
-3. Remainder classified as E1 (<1.5 mm diameter)
+This deterministic method also uses the EDT, but avoids watershed seeds. It thresholds the EDT at anatomical radii from large to small, dilates each core by the same radius, intersects with the emphysema mask, and subtracts each classified region before processing smaller thresholds.
 
-**Pros:**
-- Parameter-free size decision (thresholds are anatomical radii)
-- Deterministic and geometrically interpretable
+Key details:
 
-See: `emphy_size_distance_iterative.py` for implementation (`edt_iterative_clustering()`, `compute_edt()`, `compute_emphysema_indices()`).
+- Radius thresholds: 7.5, 3.5, 0.75 mm
+- Core voxels satisfy `EDT > radius`
+- Output includes a `cluster_map` with labels 1-4 for E1-E4
+- Main functions: `compute_edt()`, `edt_iterative_clustering()`, `compute_emphysema_indices()`
 
----
+Best for: deterministic size classification without sigma estimation or seed tuning.
+
+Tradeoffs: less instance-specific than watershed; classification follows threshold/dilation geometry.
+
+## Method Comparison
+
+| Aspect | Gaussian LPF | Distance + Watershed | Iterative EDT |
+| --- | --- | --- | --- |
+| Main file | `emphy_size.py` | `emphy_size_distance.py` | `emphy_size_distance_iterative.py` |
+| Size signal | Gaussian kernel response | EDT peak radius | EDT threshold radius |
+| Published basis | Oh et al. (2017) | Research alternative | Research alternative |
+| Main parameter | Sigma equation | h-maxima seed threshold | Anatomical radius thresholds |
+| Per-hole catalogue | No | Yes | Counts by cluster map |
+| Touching holes | May merge/blur | Watershed separation | Iterative threshold/dilation |
+| Interpretability | Indirect | Direct radius at seed | Direct radius threshold |
+
+Recommendation:
+
+- Use Gaussian LPF when reproducing the published method matters most.
+- Use Distance + Watershed when per-hole instances and centers are important.
+- Use Iterative EDT when you want a deterministic, geometry-based size map.
+- For research comparisons, run all three and compare subgroup volumes/fractions.
 
 ## Installation
 
-### Requirements
-- Python 3.8+
-- Anaconda/Miniconda (recommended)
+Requirements:
 
-### Setup
+- Python 3.8+
+- Anaconda/Miniconda recommended
+
+Setup:
 
 ```bash
-# Clone repository
 git clone https://github.com/jingW-0/emphysema_quantification.git
 cd emphysema_quantification
-
-# Create conda environment
 conda create -n emphysema python=3.11
 conda activate emphysema
-
-# Install dependencies
 pip install SimpleITK scipy numpy scikit-image matplotlib pydicom
 ```
 
-## Testing
+For tests and development tools:
 
-### Unit Tests
-
-The project includes comprehensive unit tests for both algorithms.
-
-**Install test dependencies:**
 ```bash
 pip install -r requirements-dev.txt
 ```
 
-**Run all tests:**
-```bash
-pytest
-```
-
-**Run tests with coverage report:**
-```bash
-pytest --cov=. --cov-report=html
-# Open htmlcov/index.html to view coverage
-```
-
-**Run specific test file:**
-```bash
-pytest tests/test_emphy_size.py -v
-```
-
-**Run specific test class or function:**
-```bash
-pytest tests/test_emphy_size.py::TestNoiseReduction -v
-pytest tests/test_emphy_size.py::TestNoiseReduction::test_noise_reduction_removes_small_clusters -v
-```
-
-**Run tests in parallel (faster):**
-```bash
-pytest -n auto
-```
-
-### Code Quality
-
-**Format code (auto-fix):**
-```bash
-black emphy_size.py emphy_size_distance.py tests/
-isort emphy_size.py emphy_size_distance.py tests/
-```
-
-**Check code quality:**
-```bash
-flake8 emphy_size.py emphy_size_distance.py tests/
-mypy emphy_size.py emphy_size_distance.py --ignore-missing-imports
-```
-
-**Run all checks with tox (multiple Python versions):**
-```bash
-tox                    # Run tests on all Python versions
-tox -e coverage        # Generate coverage report
-tox -e lint            # Run linting checks
-tox -e format          # Auto-format code
-tox -e typecheck       # Run type checking
-```
-
-### Continuous Integration
-
-GitHub Actions automatically runs tests on every push and pull request:
-- Tests run on Python 3.9, 3.10, 3.11
-- Tests run on Linux, Windows, macOS
-- Code coverage is uploaded to Codecov
-- Linting checks enforce code quality
-
-See [`.github/workflows/tests.yml`](.github/workflows/tests.yml) for CI configuration.
-
-### Test Structure
-
-```
-tests/
-├── __init__.py                 # Test package
-├── conftest.py                 # Pytest fixtures and test utilities
-├── test_emphy_size.py          # Tests for Gaussian LPF method
-└── test_emphy_size_distance.py # Tests for distance transform method
-```
-
-**Fixtures (in `conftest.py`):**
-- `synthetic_ct_volume` — Synthetic CT with lung and emphysema regions
-- `synthetic_spacing` — Typical voxel spacing (2mm, 0.625mm, 0.625mm)
-- `synthetic_lung_mask` — Lung segmentation mask
-- `synthetic_emph_mask` — Emphysema (LAA) mask
-- `temp_test_dir` — Temporary directory for test outputs
-
-**Test Coverage:**
-- Parameter validation and edge cases
-- Core algorithm functions (sigma estimation, noise reduction, distance transform)
-- Data container initialization and serialization
-- Integration tests with synthetic data
-- Output format and type correctness
-
 ## Usage
 
-### Basic Pipeline (Gaussian LPF Method)
+### Gaussian LPF
 
 ```python
 from emphy_size import run_pipeline
 
-# Load DICOM and classify
-result = run_pipeline(
-    dicom_dir="path/to/inspiratory_ct_dicom",
-    dicom_dir_exp="path/to/expiratory_ct_dicom"  # optional
-)
-
-# Access results
+result = run_pipeline(dicom_dir="path/to/inspiratory_ct_dicom")
 print(result.summary())
-print(f"  E1 volume: {result.e1_volume_ml:.1f} mL ({result.e1_fraction:.2f}%)")
-print(f"  E2 volume: {result.e2_volume_ml:.1f} mL ({result.e2_fraction:.2f}%)")
-print(f"  E3 volume: {result.e3_volume_ml:.1f} mL ({result.e3_fraction:.2f}%)")
-print(f"  E4 volume: {result.e4_volume_ml:.1f} mL ({result.e4_fraction:.2f}%)")
 ```
 
-### Distance Transform + Watershed Method
+### Distance Transform + Watershed
 
 ```python
 from emphy_size_distance import run_pipeline
 
-result = run_pipeline(
-    dicom_dir="path/to/inspiratory_ct_dicom"
-)
-
+result = run_pipeline(dicom_dir="path/to/inspiratory_ct_dicom", h_mm=1.0)
 print(result.summary())
+print(result.hole_catalogue[:5])
+```
+
+### Iterative EDT Thresholding
+
+```python
+from emphy_size_distance_iterative import run_pipeline
+
+result = run_pipeline(dicom_dir="path/to/inspiratory_ct_dicom")
+print(result.summary())
+cluster_map = result.cluster_map
 ```
 
 ### Command Line
 
-```bash
-# Gaussian LPF method
-python emphy_size.py
+Each script can be run directly after editing its `if __name__ == "__main__"` DICOM path:
 
-# Distance Transform + Watershed method
+```bash
+python emphy_size.py
 python emphy_size_distance.py
+python emphy_size_distance_iterative.py
 ```
 
-(Edit the `if __name__ == "__main__"` sections with your DICOM directory paths)
+## Outputs
+
+All three methods report:
+
+- Total `%LAA`
+- Lung volume in mL
+- E1, E2, E3, and E4 volumes in mL
+- E1, E2, E3, and E4 fractions as percent of lung volume
+
+Method-specific outputs:
+
+- `emphy_size.py`: subgroup masks in `result.masks`
+- `emphy_size_distance.py`: subgroup masks plus `result.hole_catalogue`
+- `emphy_size_distance_iterative.py`: labeled `result.cluster_map` and subgroup hole counts
+
+## Visualization
+
+Visualization helpers are available in the algorithm modules:
+
+- `visualize_lpf_iteration()` in `emphy_size.py`
+- `visualize_subgroup_clusters_on_axial_slices()` in `emphy_size.py`
+- `visualize_orthogonal_views()` in `emphy_size_distance.py`
+- `visualize_distance_field()` in `emphy_size_distance.py`
+- `visualize_seeds_on_edt()` in `emphy_size_distance.py`
+- `visualize_subgroup_masks_on_image()` in `emphy_size_distance.py`
+
+The pipeline scripts currently display several matplotlib figures during execution.
 
 ## Examples
 
-- **Iterative EDT notebook**: runs a synthetic CT example using the iterative EDT thresholding method and visualizes the resulting `cluster_map`.
+The iterative EDT example notebook builds a synthetic CT example, runs the iterative EDT thresholding method, and visualizes the resulting cluster map.
 
-   - Notebook: [emphy_size_distance_iterative_example.ipynb](emphy_size_distance_iterative_example.ipynb)
-   - Saved figure (generated by the notebook): `iterative_example_cluster_map.png`
+- Notebook: `emphy_size_distance_iterative_example.ipynb`
 
-   Quick run options:
+Run it with:
 
-   - Open the notebook interactively:
-
-      ```bash
-      jupyter notebook emphy_size_distance_iterative_example.ipynb
-      ```
-
-   - After running the notebook, open the saved example image:
-
-      ```powershell
-      # Windows
-      start iterative_example_cluster_map.png
-      ```
-
-      ```bash
-      # macOS
-      open iterative_example_cluster_map.png
-
-      # Linux
-      xdg-open iterative_example_cluster_map.png
-      ```
-
-   Note: the notebook uses the repository's `emphy_size_distance_iterative.py` module and the synthetic data pattern used in the test fixtures.
-
-## Output
-
-Both pipelines return an `EmphysemaResult` object containing:
-
-```python
-@dataclass
-class EmphysemaResult:
-    laa_percent: float           # Total %LAA
-    
-    e1_volume_ml: float          # E1 volume (mL)
-    e2_volume_ml: float          # E2 volume (mL)
-    e3_volume_ml: float          # E3 volume (mL)
-    e4_volume_ml: float          # E4 volume (mL)
-    
-    e1_fraction: float           # E1 as % of lung volume
-    e2_fraction: float           # E2 as % of lung volume
-    e3_fraction: float           # E3 as % of lung volume
-    e4_fraction: float           # E4 as % of lung volume
-    
-    lung_volume_ml: float        # Total lung volume (mL)
-    voxel_size_ml: float         # Volume per voxel (mL)
-    
-    masks: dict                  # {'E1': mask, 'E2': mask, ...}
+```bash
+jupyter notebook emphy_size_distance_iterative_example.ipynb
 ```
 
-### Visualizations
+## Testing
 
-Both pipelines include visualization helpers:
+Run all tests:
 
-- **`visualize_orthogonal_views()`** — Show lung/emphysema masks on axial, coronal, sagittal slices
-- **`visualize_distance_field()`** — Display Euclidean distance transform (distance-transform only)
-- **`visualize_seeds_on_edt()`** — Overlay detected seeds on EDT (distance-transform only)
-- **`visualize_subgroup_masks_on_image()`** — Color-coded emphysema subgroups on CT image
-- **`visualize_subgroup_clusters_on_axial_slices()`** — Axial slice overlays at quartile heights
-- **`visualize_lpf_iteration()`** — Gaussian filter output at each size iteration (Gaussian LPF only)
-
-Enable via passing `volume` parameter and setting matplotlib to interactive mode:
-
-```python
-import matplotlib.pyplot as plt
-plt.ion()  # interactive mode
-
-result = run_pipeline("path/to/dicom")
-# Visualizations display automatically during pipeline execution
+```bash
+pytest
 ```
 
-## File Structure
+Run individual test files:
 
+```bash
+pytest tests/test_emphy_size.py -v
+pytest tests/test_emphy_size_distance.py -v
+pytest tests/test_emphy_size_distance_iterative.py -v
 ```
+
+Run coverage:
+
+```bash
+pytest --cov=. --cov-report=html
+```
+
+Run formatting and checks:
+
+```bash
+black emphy_size.py emphy_size_distance.py emphy_size_distance_iterative.py tests/
+isort emphy_size.py emphy_size_distance.py emphy_size_distance_iterative.py tests/
+flake8 emphy_size.py emphy_size_distance.py emphy_size_distance_iterative.py tests/
+mypy emphy_size.py emphy_size_distance.py emphy_size_distance_iterative.py --ignore-missing-imports
+```
+
+## Repository Structure
+
+```text
 emphysema_quantification/
-├── emphy_size.py                    # Gaussian LPF-based classification (Oh et al. 2017)
-├── emphy_size_distance.py           # Distance transform + watershed classification
-├── emphy_size_notebook.ipynb        # Jupyter notebook: Gaussian LPF analysis
-├── emphy_size_distance_notebook.ipynb  # Jupyter notebook: Distance transform analysis
-├── README.md                        # This file
-├── .gitignore                       # Python/Jupyter ignore rules
-└── Figure_1.png                     # Reference diagram
+|-- emphy_size.py                         # Gaussian LPF method
+|-- emphy_size_distance.py                # Distance transform + watershed method
+|-- emphy_size_distance_iterative.py      # Iterative EDT thresholding method
+|-- emphy_size_distance_iterative_example.ipynb
+|-- tests/
+|   |-- test_emphy_size.py
+|   |-- test_emphy_size_distance.py
+|   |-- test_emphy_size_distance_iterative.py
+|   `-- conftest.py
+|-- requirements-dev.txt
+|-- pytest.ini
+|-- tox.ini
+|-- Figure_1.png
+`-- README.md
 ```
-
-## Comparison: Which Method to Use?
-
-| Aspect | Gaussian LPF | Distance Transform | Iterative EDT |
-|--------|------|-----------|---------------|
-| **Published?** | Yes (Oh et al. 2017) | Novel alternative | Novel (deterministic) |
-| **Parameters** | σ estimation required | Parameter-free | Anatomical radius thresholds |
-| **Computational** | Iterative filtering | Single pass (watershed) | Iterative thresholds + dilations |
-| **Non-spherical holes** | Assumes approximate spheres | Handles any shape | Handles any shape (dilation-based) |
-| **Touching holes** | May underestimate | Naturally separated (watershed) | Separated by iteration and dilation |
-| **Direct interpretability** | Indirect (kernel size → size) | Direct (EDT value = radius) | Direct (thresholded radius, deterministic) |
-
-**Recommendation:**
-- **Clinical validation needed:** Use Gaussian LPF (established method)
-- **Research/algorithm comparison:** Use Distance Transform or Iterative EDT (interpretable)
-- **Best practice:** Run multiple methods and compare outputs
-
-
-
-### 3. Iterative EDT Thresholding Method (`emphy_size_distance_iterative.py`)
-
-An alternative deterministic approach that classifies emphysema by directly
-thresholding the Euclidean Distance Transform (EDT) at anatomically grounded
-radii (large → small) and recovering full hole regions by dilation.
-
-**Pipeline (iterative EDT thresholding):**
-1. Compute EDT in physical mm for the noise-reduced emphysema mask
-2. For each radius threshold (7.5, 3.5, 0.75 mm):
-   - select core voxels with EDT > radius (hole centers)
-   - dilate cores by the same radius (recover full hole region)
-   - intersect with original emphysema mask and subtract from remaining mask
-3. Remainder classified as E1 (<1.5 mm diameter)
-
-**Pros:**
-- Parameter-free size decision (thresholds are anatomical radii)
-- Deterministic and geometrically interpretable
-
-**See:** `emphy_size_distance_iterative.py` for implementation (`edt_iterative_clustering()`, `compute_edt()`, `compute_emphysema_indices()`).
 
 ## References
 
-1. **Oh et al. (2017)** — "Size variation and collapse of emphysema holes at inspiration and expiration CT scan"  
-   *International Journal of COPD* 12:2043–2057  
-   DOI: 10.2147/COPD.S130936
-
-2. **Grady, L. (2006)** — "Random Walks for Image Segmentation"  
-   *IEEE Transactions on Pattern Analysis and Machine Intelligence* 28(11):1768–1783  
-   (Watershed algorithm foundation)
-
-3. **Mehnert & Jackway (1997)** — "An improved seeded region growing algorithm"  
-   *Pattern Recognition Letters* 18(10):1065–1071
+1. Oh et al. (2017), "Size variation and collapse of emphysema holes at inspiration and expiration CT scan", International Journal of COPD 12:2043-2057. DOI: 10.2147/COPD.S130936
+2. Grady, L. (2006), "Random Walks for Image Segmentation", IEEE Transactions on Pattern Analysis and Machine Intelligence 28(11):1768-1783.
+3. Mehnert & Jackway (1997), "An improved seeded region growing algorithm", Pattern Recognition Letters 18(10):1065-1071.
 
 ## License
 
-MIT License (adjust as needed)
-
-## Author
-
-Created for emphysema phenotyping research.
-
-## Contributing
-
-Contributions welcome! Please:
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/your-feature`)
-3. Commit changes (`git commit -am 'Add feature'`)
-4. Push to branch (`git push origin feature/your-feature`)
-5. Submit a Pull Request
+MIT License.
 
 ## Contact
 
