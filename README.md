@@ -341,6 +341,28 @@ EDT-based segmentation provides direct hole sizing:
 
 See `emphy_size_distance.py` function `distance_transform_pipeline()` for details.
 
+---
+
+### 3. Iterative EDT Thresholding Method (`emphy_size_distance_iterative.py`)
+
+An alternative deterministic approach that classifies emphysema by directly
+thresholding the Euclidean Distance Transform (EDT) at anatomically grounded
+radii (large → small) and recovering full hole regions by dilation.
+
+**Pipeline (iterative EDT thresholding):**
+1. Compute EDT in physical mm for the noise-reduced emphysema mask
+2. For each radius threshold (7.5, 3.5, 0.75 mm):
+   - select core voxels with EDT > radius (hole centers)
+   - dilate cores by the same radius (recover full hole region)
+   - intersect with original emphysema mask and subtract from remaining mask
+3. Remainder classified as E1 (<1.5 mm diameter)
+
+**Pros:**
+- Parameter-free size decision (thresholds are anatomical radii)
+- Deterministic and geometrically interpretable
+
+**See:** `emphy_size_distance_iterative.py` for implementation (`edt_iterative_clustering()`, `compute_edt()`, `compute_emphysema_indices()`).
+
 ## References
 
 1. **Oh et al. (2017)** — "Size variation and collapse of emphysema holes at inspiration and expiration CT scan"  
