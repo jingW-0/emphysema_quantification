@@ -1,6 +1,6 @@
 # Emphysema Quantification Pipeline
 
-A Python framework for automated emphysema size classification from high-resolution CT scans, implementing two complementary algorithms for anatomical hole sizing.
+A Python framework for automated emphysema size classification from high-resolution CT scans, implementing three complementary algorithms for anatomical hole sizing.
 
 ## Background
 
@@ -11,7 +11,7 @@ Emphysema is characterized by destruction of alveolar walls, creating air-filled
 - **E3** (7–15 mm): Acinar/sublobular disease
 - **E4** (≥15 mm): Paraseptal/extra-lobular emphysema
 
-This codebase provides two independent methods for automated classification of emphysema holes.
+This codebase provides three independent methods for automated classification of emphysema holes.
 
 ## Algorithms & Details
 
@@ -78,6 +78,28 @@ Based on: **Oh et al. (2017)** — "Size variation and collapse of emphysema hol
 **Cons:**
 - Assumes holes are distinguishable in EDT (may fail in densely clustered emphysema)
 - Watershed sensitive to seed selection
+
+---
+
+### 3. Iterative EDT Thresholding Method (`emphy_size_distance_iterative.py`)
+
+An alternative deterministic approach that classifies emphysema by directly
+thresholding the Euclidean Distance Transform (EDT) at anatomically grounded
+radii (large → small) and recovering full hole regions by dilation.
+
+**Pipeline (iterative EDT thresholding):**
+1. Compute EDT in physical mm for the noise-reduced emphysema mask
+2. For each radius threshold (7.5, 3.5, 0.75 mm):
+   - select core voxels with EDT > radius (hole centers)
+   - dilate cores by the same radius (recover full hole region)
+   - intersect with original emphysema mask and subtract from remaining mask
+3. Remainder classified as E1 (<1.5 mm diameter)
+
+**Pros:**
+- Parameter-free size decision (thresholds are anatomical radii)
+- Deterministic and geometrically interpretable
+
+See: `emphy_size_distance_iterative.py` for implementation (`edt_iterative_clustering()`, `compute_edt()`, `compute_emphysema_indices()`).
 
 ---
 
@@ -335,19 +357,19 @@ emphysema_quantification/
 
 ## Comparison: Which Method to Use?
 
-| Aspect | Gaussian LPF | Distance Transform |
-|--------|------|-----------|
-| **Published?** | Yes (Oh et al. 2017) | Novel alternative |
-| **Parameters** | σ estimation required | Parameter-free |
-| **Computational** | Iterative filtering | Single pass |
-| **Non-spherical holes** | Assumes approximate spheres | Handles any shape |
-| **Touching holes** | May underestimate | Naturally separated |
-| **Direct interpretability** | Indirect (kernel size → size) | Direct (EDT value = radius) |
+| Aspect | Gaussian LPF | Distance Transform | Iterative EDT |
+|--------|------|-----------|---------------|
+| **Published?** | Yes (Oh et al. 2017) | Novel alternative | Novel (deterministic) |
+| **Parameters** | σ estimation required | Parameter-free | Anatomical radius thresholds |
+| **Computational** | Iterative filtering | Single pass (watershed) | Iterative thresholds + dilations |
+| **Non-spherical holes** | Assumes approximate spheres | Handles any shape | Handles any shape (dilation-based) |
+| **Touching holes** | May underestimate | Naturally separated (watershed) | Separated by iteration and dilation |
+| **Direct interpretability** | Indirect (kernel size → size) | Direct (EDT value = radius) | Direct (thresholded radius, deterministic) |
 
 **Recommendation:**
 - **Clinical validation needed:** Use Gaussian LPF (established method)
-- **Research/algorithm comparison:** Use Distance Transform (novel, interpretable)
-- **Best practice:** Run both and compare outputs
+- **Research/algorithm comparison:** Use Distance Transform or Iterative EDT (interpretable)
+- **Best practice:** Run multiple methods and compare outputs
 
 
 
