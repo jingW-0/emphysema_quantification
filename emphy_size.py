@@ -314,14 +314,12 @@ def size_based_emphysema_clustering(
         filtered = gaussian_filter(current_mask.astype(np.float32), sigma=sigma_vox)
 
         # --- Select skeleton voxels (Eq. S6) ---
-        # Voxels where filtered value equals the global maximum density
-        # In practice: voxels at local maxima of the filtered image
         max_val = filtered.max()
         if max_val == 0:
             subgroup_masks[label_name] = np.zeros_like(current_mask, dtype=bool)
             continue
 
-        skeleton_mask = (filtered >= max_val * 0.999).astype(bool)
+        skeleton_mask = filtered >= 0.99
 
         # --- Dilation by radius ---
         dilation_voxels = max(1, int(round(radius_mm / mean_spacing)))
